@@ -212,6 +212,14 @@ class CELoss(Layer):
         return - self.cache['labels'] / (self.cache['logits'] * self.cache['logits'].shape[0])
 
 
+class DiscreteCELoss(Layer):
+    def __init__(self):
+        self.cache = {}
+        self.has_weights = False
+        super(DiscreteCELoss, self).__init__()
+
+    def forward(self, logits, label, is_training)
+
 class Model:
     def __init__(self, *model, **kwargs):
         self.model = model
