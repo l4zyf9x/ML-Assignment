@@ -218,7 +218,9 @@ class DiscreteCELoss(Layer):
         self.has_weights = False
         super(DiscreteCELoss, self).__init__()
 
-    def forward(self, logits, label, is_training)
+    def forward(self, logits, label, is_trainin=True):
+        loss = - np.sum(logits(label))
+
 
 class Model:
     def __init__(self, *model, **kwargs):

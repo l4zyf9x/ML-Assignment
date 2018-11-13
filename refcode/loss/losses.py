@@ -23,4 +23,5 @@ class CategoricalCrossEntropy:
         :param predictions:[numpy array]: Predicted labels
         :return:[numpy array]: The computed derivatives of categorical cross entropy function.
         '''
+        print('[DEBUG] labels, predict: ', labels.shape, predictions.shape)
         return labels - predictions
