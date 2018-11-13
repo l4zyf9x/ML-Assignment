@@ -112,16 +112,16 @@ def get_batches(data, labels=None, batch_size=256, shuffle=True):
     for batch_num in range(num_batches):
         if labels is not None:
             yield (data[batch_num*batch_size:(batch_num+1)*batch_size].T,
-                  labels[:, batch_num*batch_size:(batch_num+1)*batch_size]) if len(data.shape) == 2 \
+                  labels[batch_num*batch_size:(batch_num+1)*batch_size]) if len(data.shape) == 2 \
                       else (data[batch_num*batch_size:(batch_num+1)*batch_size],
-                  labels[:, batch_num*batch_size:(batch_num+1)*batch_size])
+                  labels[batch_num*batch_size:(batch_num+1)*batch_size])
         else:
             yield data[batch_num*batch_size:(batch_num+1)*batch_size].T if len(data.shape) == 2 else \
                 data[batch_num*batch_size:(batch_num+1)*batch_size]
     if N%batch_size != 0 and num_batches != 0:
         if labels is not None:
-            yield (data[num_batches*batch_size:].T, labels[:, num_batches*batch_size:]) if len(data.shape) == 2 else \
-                (data[num_batches*batch_size:], labels[:, num_batches*batch_size:])
+            yield (data[num_batches*batch_size:].T, labels[num_batches*batch_size:]) if len(data.shape) == 2 else \
+                (data[num_batches*batch_size:], labels[num_batches*batch_size:])
         else:
             yield data[num_batches*batch_size:].T if len(data.shape)==2 else data[num_batches*batch_size:]
 
