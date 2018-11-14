@@ -20,6 +20,172 @@ class Layer:
         pass
 
 
+def get_im2col_indices(x_shape, field_height, field_width, padding=1, stride=(1, 1)):
+    """ An implementation of im2col based on some fancy indexing 
+
+    Args: 
+        x_shape : [B, Cin, H, W]
+        field_height: kH
+        field_width: kW
+
+    Return: [B*OH*OW, kH*kW*Cin]
+    """
+
+    # First figure out what the size of the output should be
+    N, C, H, W = x_shape
+    assert (H + 2 * padding - field_height) % stride[0] == 0
+    assert (W + 2 * padding - field_height) % stride[1] == 0
+    out_height = (H + 2 * padding - field_height) // stride[0] + 1
+    out_width = (W + 2 * padding - field_width) // stride[1] + 1
+
+    i0 = np.repeat(np.arange(field_height), field_width)
+    i0 = np.tile(i0, C)
+    i1 = stride[0] * np.repeat(np.arange(out_height), out_width)
+    j0 = np.tile(np.arange(field_width), field_height * C)
+    j1 = stride[1] * np.tile(np.arange(out_width), out_height)
+    i = i0.reshape(-1, 1) + i1.reshape(1, -1)
+    j = j0.reshape(-1, 1) + j1.reshape(1, -1)
+
+    k = np.repeat(np.arange(C), field_height * field_width).reshape(-1, 1)
+
+    return (k, i, j)
+
+
+def im2col_indices(x, filter=(2, 2), padding=1, stride=(1, 1)):
+    """ An implementation of im2col based on some fancy indexing 
+
+    Args: 
+        x : [B, H, W, Cin]
+        field_height: kH
+        field_width: kW
+
+    Return: [B*OH*OW, kH*kW*Cin]
+    """
+
+    # x => [B, Cin, H, W]
+    x = x.tranpose(0, 3, 1, 2)
+
+    # Zero-pad the input
+    p = padding
+    x_padded = np.pad(x, ((0, 0), (0, 0), (p, p), (p, p)), mode='constant')
+
+    k, i, j = get_im2col_indices(x.shape, filter[0], filter[1], padding,
+                                 stride)
+    # cols => [B, kH*kW*Cin, OH*OW]
+    cols = x_padded[:, k, i, j]
+    C = x.shape[1]
+
+    # cols => [B*OH*OW, kH*kW*Cin]
+    cols = cols.transpose(0, 2, 1).reshape(-1, filter[0] * filter[1] * C)
+    return cols
+
+
+def col2im_indices(cols, x_shape, filter=(2, 2), padding=1,
+                   stride=1):
+    """ An implementation of col2im based on fancy indexing and np.add.at 
+
+    Args:
+        cols: [B*OH*OW, kH*kW*Cin]
+        x_shape: Shape of initial input (B, H, W, Cin)
+        filter: Shape of filter (kH, kW)
+
+    Returns: [B, H, W, Cin]
+
+
+    """
+
+    N, H, W, C = x_shape
+    H_padded, W_padded = H + 2 * padding, W + 2 * padding
+    x_padded = np.zeros((N, C, H_padded, W_padded), dtype=cols.dtype)
+    k, i, j = get_im2col_indices(x_shape, filter[0], filter[1], padding,
+                                 stride)
+    # cols => [B*OH*OW, kH*kW*Cin]
+    # cols_reshaped => [B, OH*OW, kH*kW*Cin]
+    cols_reshaped = cols.reshape(N, -1, C * filter[0] * filter[1])
+
+    # [B, C * kH * kW, OH*OW]
+    cols_reshaped = cols_reshaped.transpose(0, 2, 1)
+    np.add.at(x_padded, (slice(None), k, i, j), cols_reshaped)
+    if padding == 0:
+        return x_padded
+    return x_padded[:, :, padding:-padding, padding:-padding].tranpose(0, 2, 3, 1)
+
+
+class Conv2d(Layer):
+    """ An implementation of Convolution 2D"""
+    def __init__(self, input_shape=(-1, 3, 3, 1), filter=(1, 2, 2, 1), stride=(1, 1), padding='VALID'):
+        super(Conv2d, self).__init__()
+        self.has_weights = True
+        self.input_shape = input_shape
+        self.filter = filter
+        self.stride = stride
+        self.cache = {}
+        self.w_shape = []
+        self.padding = 0
+        self.out_height = (input_shape[1] + 2 * padding -
+                           filter[1]) // stride[0] + 1
+        self.out_width = (input_shape[2] + 2 * padding -
+                          filter[2]) // stride[1] + 1
+
+        self.linear_in = filter[1] * filter[2] * filter[3]
+        self.linear_out = filter[0]
+        self._linear = Linear(self.linear_in, self.linear_out)
+
+    def forward(self, x, is_training=True):
+        """Implement forward for Conv2d
+
+        x: [B, H, W, Cin]
+        """
+        B, _, _, _ = x.shape
+        self.input_shape = x.shape
+
+        # x2row =>  [B*H*W, Cin]
+        x2row = im2col_indices(
+            x, filter=(self.filter[1], self.filter[2]), padding=self.padding, stride=self.stride)
+        assert x2row.shape == [B * self.out_height *
+                               self.out_height, self.linear_in]
+
+        # out [B*OH*OW, Cout]
+        out = self._linear.forward(x2row)
+        # out [B, OH, OW, Cout]
+        return out.reshape((B, self.out_height, self.out_width, self.linear_out))
+
+    def backward(self, dy):
+        """Implement forward for Conv2d
+
+        dy: [B, H, W, Cout]
+        """
+        # dy => [B, OH, OW, Cout]
+        dy = dy.reshape(-1, self.linear_out)
+        # dx => [B]
+        dx = self._linear.backward(dy)
+
+        # cols => [B* OH*OW, kH*kW*Cin] => [kH*kW*Cin ,OH*OW, B] => [kH*kW*Cin ,OH*OW*B]
+        # dx = dx.reshape(-1, self.out_height*self.out_width,
+        #                 self.linear_in).tranpose(2, 1, 0).reshape(self.linear_in, -1)
+        #
+        dx = col2im_indices(cols=dx, x_shape=self.input_shape, filter=(
+            self.filter[1], self.filter[2]), padding=self.padding)
+
+        return dx
+
+    def apply_grads(self, learning_rate=0.01, l2_penalty=1e-4):
+        self._linear.apply_grads(learning_rate=0.01, l2_penalty=1e-4)
+
+
+class Flatten(Layer):
+    def __init__(self, input_shape):
+        super(Flatten, self).__init__()
+        self.input_shape = input_shape
+        self.out_num = np.prod(input_shape[1:])
+
+    def forward(self, x):
+        return x.reshape(-1, self.out_num)
+
+    def backward(self, dy):
+        return dy.reshape(tuple(self.input_shape))
+
+
 class Linear(Layer):
     """ Implement fully connected dense layer.
 
@@ -48,9 +214,9 @@ class Linear(Layer):
         if distribution != None:
             raise ValueError(
                 'Not implement distribution for initiating variable')
-        
+
         # print(w)
-        return np.random.randn(shape[0], shape[1])* 1e-4
+        return np.random.randn(shape[0], shape[1]) * 1e-4
 
     def initiate_vars_zero(self, shape):
         return np.zeros(shape)
