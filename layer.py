@@ -77,6 +77,7 @@ def im2col_indices(x, filter=(2, 2), padding=1, stride=(1, 1)):
     cols = x_padded[:, k, i, j]
     C = x.shape[1]
 
+
     # cols => [B*OH*OW, kH*kW*Cin]
     cols = cols.transpose(0, 2, 1).reshape(-1, filter[0] * filter[1] * C)
     return cols
@@ -178,7 +179,7 @@ class Conv2d(Layer):
         return dx
 
     def apply_grads(self, learning_rate=0.01, l2_penalty=1e-4):
-        self._linear.apply_grads(learning_rate=0.01, l2_penalty=1e-4)
+        self._linear.apply_grads(learning_rate=0.01, l2_penalty=l2_penalty)
 
 
 class Flatten(Layer):
@@ -306,28 +307,28 @@ class Softmax(Layer):
         return logits
 
     def backward(self, dy):
-        # if(len(dy.shape) != 2):
-        #     raise ValueError(
-        #         'data have shape is not compatible. Expect [batch_size, nums_score]')
-        # num_units = dy.shape[-1]
+        if(len(dy.shape) != 2):
+            raise ValueError(
+                'data have shape is not compatible. Expect [batch_size, nums_score]')
+        num_units = dy.shape[-1]
 
-        # # [batch_size, num_units, 1] . [batch_size, 1, num_units]
-        # # = [batch_size, num_units, num_units]
-        # # Represent of matrix ds:
-        # #   [ds1/dx1 ds1/dx2 ... ds1/dxN]
-        # #   [ds2/dx1 ds2/dx2 ... ds2/dxN]
-        # #   [  ...           ...    ... ]
-        # #   [dsN/dx1 dsN/dx2 ... dsN/dxN]
-        # # with ds_i/dx_j = S_i(1 - S_j)  , with i==j
-        # #                = -S_i*S_j      , with i!=j
-        # ds = -np.matmul(np.expand_dims(self.cache['logits'], axis=-1),
-        #                 np.expand_dims(self.cache['logits'], axis=1))
-        # ds[:, np.arange(num_units), np.arange(
-        #     num_units)] += self.cache['logits']
+        # [batch_size, num_units, 1] . [batch_size, 1, num_units]
+        # = [batch_size, num_units, num_units]
+        # Represent of matrix ds:
+        #   [ds1/dx1 ds1/dx2 ... ds1/dxN]
+        #   [ds2/dx1 ds2/dx2 ... ds2/dxN]
+        #   [  ...           ...    ... ]
+        #   [dsN/dx1 dsN/dx2 ... dsN/dxN]
+        # with ds_i/dx_j = S_i(1 - S_j)  , with i==j
+        #                = -S_i*S_j      , with i!=j
+        ds = -np.matmul(np.expand_dims(self.cache['logits'], axis=-1),
+                        np.expand_dims(self.cache['logits'], axis=1))
+        ds[:, np.arange(num_units), np.arange(
+            num_units)] += self.cache['logits']
 
-        # dx = np.matmul(np.expand_dims(dy, axis=1), ds)
-        # return np.squeeze(dx, axis=1)
-        return dy
+        dx = np.matmul(np.expand_dims(dy, axis=1), ds)
+        return np.squeeze(dx, axis=1)
+        # return dy
 
 
 class CELoss():
@@ -346,12 +347,12 @@ class CELoss():
         # super(CELoss, self).__init__()
 
     def compute_loss(self, logits, labels, is_training=True):
-        # logits = np.clip(logits, self.eps, 1. - self.eps)
+        logits = np.clip(logits, self.eps, 1. - self.eps)
         # logits => [batch_size, num_units]
         # labels => [batch_size, num_units]
         if is_training:
-            self.cache['labels'] = labels
-            self.cache['logits'] = logits
+            self.cache['labels'] = labels.copy()
+            self.cache['logits'] = logits.copy()
         self.batch_size = logits.shape[0]
         loss = - np.sum(labels * np.log(logits)) / self.batch_size
         return loss
@@ -359,9 +360,9 @@ class CELoss():
     def compute_derivation(self, logits, labels):
         # => [batch_size, num_units]
 
-        return (logits - labels)/self.batch_size
+        # return (logits - labels)/self.batch_size
         # return - self.cache['labels'] / (self.cache['logits'] * self.cache['logits'].shape[0])
-        # return - self.cache['labels'] / (self.cache['logits'] * self.batch_size)
+        return - self.cache['labels'] / (self.cache['logits'] * self.batch_size)
 
 
 class Model:
@@ -398,9 +399,11 @@ class Model:
         if N % batch_size != 0 and num_batches != 0:
             yield (data[batch_size*num_batches:], labels[batch_size*num_batches:])
 
-    def train(self, data, labels,
+    def train(self, train_data, train_labels,
+              eval_data, eval_labels,
               batch_size=1024, epochs=50,
-              display_after=50, learning_rate=0.01,
+              display_after=50, eval_after = 250,
+              learning_rate=0.01,
               l2_penalty=1e-4,
               learning_rate_decay=0.95):
         if self.loss is None:
@@ -412,9 +415,9 @@ class Model:
         for epoch in range(epochs):
             print('Running Epoch:', epoch + 1)
 
-            for i, (x_batch, y_batch) in enumerate(self.get_batches(data, labels)):
+            for i, (x_batch, y_batch) in enumerate(self.get_batches(train_data, train_labels)):
                 batch_preds = x_batch.copy()
-                for num, layer in enumerate(self.model):
+                for  layer in self.model:
                     batch_preds = layer.forward(batch_preds, is_training=True)
 
                 loss = self.loss.compute_loss(
@@ -432,8 +435,9 @@ class Model:
                 iter += 1
                 if iter % display_after == 0:
                     train_acc = self.evaluate(x_batch, y_batch)
-                    print('Step {}, loss: {}, train_acc: {}'.format(
-                        iter, loss, train_acc))
+                    eval_acc = self.evaluate(eval_data, eval_labels)
+                    print('Step {}, loss: {}, train_acc: {}, eval_acc: {}'.format(
+                        iter, loss, train_acc, eval_acc))
                 # break
             learning_rate *= learning_rate_decay
 
@@ -461,6 +465,15 @@ fashion_mnist = keras.datasets.fashion_mnist
 # test_images = test_images / 255.0
 train_images = train_images.reshape((-1, 28, 28, 1))
 test_images = test_images.reshape((-1, 28, 28, 1))
+# train_images = train_images.reshape((-1, 784))
+# test_images = test_images.reshape((-1, 784))
+
+batch_size = train_images.shape[0]
+eval_images = train_images[batch_size*9//10:]
+eval_labels = train_labels[batch_size*9//10:]
+train_images = train_images[:batch_size*9//10]
+train_labels = train_labels[:batch_size*9//10]
+
 
 labels = np.zeros((train_labels.shape[0], 10))
 labels[np.arange(train_labels.shape[0]), train_labels] = 1
@@ -468,11 +481,24 @@ train_labels = labels
 labels = np.zeros((test_labels.shape[0], 10))
 labels[np.arange(test_labels.shape[0]), test_labels] = 1
 test_labels = labels
+labels = np.zeros((eval_labels.shape[0], 10))
+labels[np.arange(eval_labels.shape[0]), eval_labels] = 1
+eval_labels = labels
 
-model = Model(Conv2d(input_shape=(-1, 28, 28, 1), filter=(10, 2, 2, 1)),
+
+
+model1 = Model(Conv2d(input_shape=(-1, 28, 28, 1), filter=(10, 2, 2, 1)),
               Flatten(input_shape= (-1, 27, 27, 10)),
               Linear(num_in=27*27*10, num_out=10),
               Softmax())
-model.set_loss(CELoss())
 
-model.train(train_images, train_labels, learning_rate=0.0001, l2_penalty=0.)
+model = Model(Linear(num_in=784, num_out=10),
+               Relu(),
+               Linear(num_in=10, num_out=10),
+               Softmax())
+
+
+
+model1.set_loss(CELoss())
+
+model1.train(train_images, train_labels, eval_images, eval_labels, learning_rate=0.00001, l2_penalty=0.)
