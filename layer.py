@@ -32,12 +32,14 @@ def get_im2col_indices(x_shape, field_height, field_width, padding=1, stride=(1,
     """
 
     # First figure out what the size of the output should be
-    N, C, H, W = x_shape
-    assert (H + 2 * padding - field_height) % stride[0] == 0
-    assert (W + 2 * padding - field_height) % stride[1] == 0
+    _, C, H, W = x_shape
+    # print(H, padding, field_height, stride[0])
+    # assert (H + 2 * padding - field_height) % stride[0] == 0
+    # assert (W + 2 * padding - field_height) % stride[1] == 0
+    # print(type(H), type(padding), type(field_height), type(stride[0]))
     out_height = (H + 2 * padding - field_height) // stride[0] + 1
     out_width = (W + 2 * padding - field_width) // stride[1] + 1
-
+    # print('DEBUG')
     i0 = np.repeat(np.arange(field_height), field_width)
     i0 = np.tile(i0, C)
     i1 = stride[0] * np.repeat(np.arange(out_height), out_width)
@@ -63,7 +65,7 @@ def im2col_indices(x, filter=(2, 2), padding=1, stride=(1, 1)):
     """
 
     # x => [B, Cin, H, W]
-    x = x.tranpose(0, 3, 1, 2)
+    x = x.transpose(0, 3, 1, 2)
 
     # Zero-pad the input
     p = padding
@@ -80,8 +82,8 @@ def im2col_indices(x, filter=(2, 2), padding=1, stride=(1, 1)):
     return cols
 
 
-def col2im_indices(cols, x_shape, filter=(2, 2), padding=1,
-                   stride=1):
+def col2im_indices(cols, x_shape, filter=(2, 2), padding=0,
+                   stride=(1,1) ):
     """ An implementation of col2im based on fancy indexing and np.add.at 
 
     Args:
@@ -93,11 +95,12 @@ def col2im_indices(cols, x_shape, filter=(2, 2), padding=1,
 
 
     """
-
+    # print(cols.shape)
+    # print(x_shape)
     N, H, W, C = x_shape
     H_padded, W_padded = H + 2 * padding, W + 2 * padding
     x_padded = np.zeros((N, C, H_padded, W_padded), dtype=cols.dtype)
-    k, i, j = get_im2col_indices(x_shape, filter[0], filter[1], padding,
+    k, i, j = get_im2col_indices((N, C, H, W), filter[0], filter[1], padding,
                                  stride)
     # cols => [B*OH*OW, kH*kW*Cin]
     # cols_reshaped => [B, OH*OW, kH*kW*Cin]
@@ -113,7 +116,9 @@ def col2im_indices(cols, x_shape, filter=(2, 2), padding=1,
 
 class Conv2d(Layer):
     """ An implementation of Convolution 2D"""
-    def __init__(self, input_shape=(-1, 3, 3, 1), filter=(1, 2, 2, 1), stride=(1, 1), padding='VALID'):
+
+    def __init__(self, input_shape=(-1, 3, 3, 1),
+                 filter=(1, 2, 2, 1), stride=(1, 1), padding='VALID'):
         super(Conv2d, self).__init__()
         self.has_weights = True
         self.input_shape = input_shape
@@ -122,9 +127,10 @@ class Conv2d(Layer):
         self.cache = {}
         self.w_shape = []
         self.padding = 0
-        self.out_height = (input_shape[1] + 2 * padding -
+        self.activation = Relu()
+        self.out_height = (input_shape[1] + 2 * self.padding -
                            filter[1]) // stride[0] + 1
-        self.out_width = (input_shape[2] + 2 * padding -
+        self.out_width = (input_shape[2] + 2 * self.padding -
                           filter[2]) // stride[1] + 1
 
         self.linear_in = filter[1] * filter[2] * filter[3]
@@ -142,11 +148,12 @@ class Conv2d(Layer):
         # x2row =>  [B*H*W, Cin]
         x2row = im2col_indices(
             x, filter=(self.filter[1], self.filter[2]), padding=self.padding, stride=self.stride)
-        assert x2row.shape == [B * self.out_height *
-                               self.out_height, self.linear_in]
+        assert x2row.shape == (B * self.out_height *
+                               self.out_height, self.linear_in)
 
         # out [B*OH*OW, Cout]
         out = self._linear.forward(x2row)
+        out = self.activation.forward(out)
         # out [B, OH, OW, Cout]
         return out.reshape((B, self.out_height, self.out_width, self.linear_out))
 
@@ -158,6 +165,7 @@ class Conv2d(Layer):
         # dy => [B, OH, OW, Cout]
         dy = dy.reshape(-1, self.linear_out)
         # dx => [B]
+        dy = self.activation.backward(dy)
         dx = self._linear.backward(dy)
 
         # cols => [B* OH*OW, kH*kW*Cin] => [kH*kW*Cin ,OH*OW, B] => [kH*kW*Cin ,OH*OW*B]
@@ -165,7 +173,7 @@ class Conv2d(Layer):
         #                 self.linear_in).tranpose(2, 1, 0).reshape(self.linear_in, -1)
         #
         dx = col2im_indices(cols=dx, x_shape=self.input_shape, filter=(
-            self.filter[1], self.filter[2]), padding=self.padding)
+            self.filter[1], self.filter[2]), padding=self.padding, stride=self.stride)
 
         return dx
 
@@ -179,7 +187,7 @@ class Flatten(Layer):
         self.input_shape = input_shape
         self.out_num = np.prod(input_shape[1:])
 
-    def forward(self, x):
+    def forward(self, x, is_training=True):
         return x.reshape(-1, self.out_num)
 
     def backward(self, dy):
@@ -298,28 +306,28 @@ class Softmax(Layer):
         return logits
 
     def backward(self, dy):
-        if(len(dy.shape) != 2):
-            raise ValueError(
-                'data have shape is not compatible. Expect [batch_size, nums_score]')
-        num_units = dy.shape[-1]
+        # if(len(dy.shape) != 2):
+        #     raise ValueError(
+        #         'data have shape is not compatible. Expect [batch_size, nums_score]')
+        # num_units = dy.shape[-1]
 
-        # [batch_size, num_units, 1] . [batch_size, 1, num_units]
-        # = [batch_size, num_units, num_units]
-        # Represent of matrix ds:
-        #   [ds1/dx1 ds1/dx2 ... ds1/dxN]
-        #   [ds2/dx1 ds2/dx2 ... ds2/dxN]
-        #   [  ...           ...    ... ]
-        #   [dsN/dx1 dsN/dx2 ... dsN/dxN]
-        # with ds_i/dx_j = S_i(1 - S_j)  , with i==j
-        #                = -S_i*S_j      , with i!=j
-        ds = -np.matmul(np.expand_dims(self.cache['logits'], axis=-1),
-                        np.expand_dims(self.cache['logits'], axis=1))
-        ds[:, np.arange(num_units), np.arange(
-            num_units)] += self.cache['logits']
+        # # [batch_size, num_units, 1] . [batch_size, 1, num_units]
+        # # = [batch_size, num_units, num_units]
+        # # Represent of matrix ds:
+        # #   [ds1/dx1 ds1/dx2 ... ds1/dxN]
+        # #   [ds2/dx1 ds2/dx2 ... ds2/dxN]
+        # #   [  ...           ...    ... ]
+        # #   [dsN/dx1 dsN/dx2 ... dsN/dxN]
+        # # with ds_i/dx_j = S_i(1 - S_j)  , with i==j
+        # #                = -S_i*S_j      , with i!=j
+        # ds = -np.matmul(np.expand_dims(self.cache['logits'], axis=-1),
+        #                 np.expand_dims(self.cache['logits'], axis=1))
+        # ds[:, np.arange(num_units), np.arange(
+        #     num_units)] += self.cache['logits']
 
-        dx = np.matmul(np.expand_dims(dy, axis=1), ds)
-        return np.squeeze(dx, axis=1)
-        # return dy
+        # dx = np.matmul(np.expand_dims(dy, axis=1), ds)
+        # return np.squeeze(dx, axis=1)
+        return dy
 
 
 class CELoss():
@@ -351,9 +359,9 @@ class CELoss():
     def compute_derivation(self, logits, labels):
         # => [batch_size, num_units]
 
-        # return (logits - labels)/self.batch_size
+        return (logits - labels)/self.batch_size
         # return - self.cache['labels'] / (self.cache['logits'] * self.cache['logits'].shape[0])
-        return - self.cache['labels'] / (self.cache['logits'] * self.batch_size)
+        # return - self.cache['labels'] / (self.cache['logits'] * self.batch_size)
 
 
 class Model:
@@ -442,29 +450,29 @@ class Model:
         return np.mean(np.argmax(labels, axis=1) == np.argmax(predictions, axis=1))
 
 
-# num_classes = 10
-# class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
-#                'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
+num_classes = 10
+class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
+               'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
 
-# fashion_mnist = keras.datasets.fashion_mnist
-# (train_images, train_labels), (test_images, test_labels) = fashion_mnist.load_data()
+fashion_mnist = keras.datasets.fashion_mnist
+(train_images, train_labels), (test_images, test_labels) = fashion_mnist.load_data()
 
-# # train_images = train_images / 255.0
-# # test_images = test_images / 255.0
-# train_images = train_images.reshape((-1, 784))
-# test_images = test_images.reshape((-1, 784))
+# train_images = train_images / 255.0
+# test_images = test_images / 255.0
+train_images = train_images.reshape((-1, 28, 28, 1))
+test_images = test_images.reshape((-1, 28, 28, 1))
 
-# labels = np.zeros((train_labels.shape[0], 10))
-# labels[np.arange(train_labels.shape[0]), train_labels] = 1
-# train_labels = labels
-# labels = np.zeros((test_labels.shape[0], 10))
-# labels[np.arange(test_labels.shape[0]), test_labels] = 1
-# test_labels = labels
+labels = np.zeros((train_labels.shape[0], 10))
+labels[np.arange(train_labels.shape[0]), train_labels] = 1
+train_labels = labels
+labels = np.zeros((test_labels.shape[0], 10))
+labels[np.arange(test_labels.shape[0]), test_labels] = 1
+test_labels = labels
 
-# model = Model(Linear(num_in=784, num_out=10),
-#               Relu(),
-#               Linear(num_in=10, num_out=10),
-#               Softmax())
-# model.set_loss(CELoss())
+model = Model(Conv2d(input_shape=(-1, 28, 28, 1), filter=(10, 2, 2, 1)),
+              Flatten(input_shape= (-1, 27, 27, 10)),
+              Linear(num_in=27*27*10, num_out=10),
+              Softmax())
+model.set_loss(CELoss())
 
-# model.train(train_images, train_labels, learning_rate=0.0001, l2_penalty=0.)
+model.train(train_images, train_labels, learning_rate=0.0001, l2_penalty=0.)
