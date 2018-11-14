@@ -441,6 +441,51 @@ class Model:
             raise ValueError('prediction shape does not match labels shape')
         return np.mean(np.argmax(labels, axis=1) == np.argmax(predictions, axis=1))
 
+class Conv2D(Layer):
+
+    def __init__(self, num_filter, kernal_size, activation=None, stride=(1,1), pading=None, input_shape=None):
+        super().__init__()
+        self.cache = {}
+        self.grads = {}
+        self.num_filter = num_filter
+        self.kernal_size = kernal_size
+        self.stride = stride
+        self.pading = pading
+        self.activation = activation
+        self.input_shape = input_shape
+
+
+    def forward(self, x, is_training=True):
+        
+        N, H, W, C  = x.shape
+        
+        w_shape = (self.num_filter, self.kernal_size[0], self.kernal_size[1], C)
+        w = np.linspace(-0.2, 0.3, num=np.prod(w_shape)).reshape(w_shape)
+         
+        out_height = 1 + (H + 2*self.pading - self.kernal_size[0])//self.stride[0]
+        out_width = 1 + (W + 2*self.pading - self.kernal_size[1])//self.stride[1]
+       
+        pad_width = ((0,0), (self.pading,self.pading), (self.pading,self.pading), (0,0))
+        x = np.pad(x, pad_width=pad_width, mode='constant', constant_values=0) 
+        out = np.zeros((N, out_height, out_width, self.num_filter))
+
+        for i in range(N):
+            for z in range(self.num_filter):
+                for j in range(out_height):
+                    for k in range(out_width):
+                        out[i, j, k, z] = np.sum(
+                            x[i, j*self.stride[0]:(j*self.stride[0]+self.kernal_size[0]), k*self.stride[1]:(k*self.stride[1]+self.kernal_size[1]),:]*w[z, :, :, :])
+
+        if is_training:
+            self.cache['x'] = x
+            self.cache['w'] = w
+  
+        return out
+
+    def backward(self, dy):
+
+
+        pass
 
 num_classes = 10
 class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
