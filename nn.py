@@ -20,36 +20,25 @@ class Layer:
         pass
 
 
-class Dense(Layer):
+class Linear(Layer):
     """ Implement fully connected dense layer.
 
-    Recieve input [batch_size,..., d_n] and produce output [batch_size,..., num_units]
+    Recieve input [batch_size, num_in] and produce output [batch_size, num_out]
     folow expression: y = activation(x.w + b)
 
     Args:
-      input_shape : Shape of input [batch_size,..., d_n]
-      num_units : length of output chanel
-      is_training : Determine whether is trainging or not
+      input_shape: (int) length input
+      num_units: (int) length of output 
+      is_training: (bool) Determine whether is trainging or not
       activation: Default is not using activation
     """
 
-    def __init__(self, input_shape, num_units, activation=None):
-        super(Dense, self).__init__()
-        if(len(input_shape) < 1):
-            raise ValueError('Input shape has least one batch size dimension')
+    def __init__(self, num_in, num_out, activation=None):
+        super(Linear, self).__init__()
         self.cache = {}
         self.grads = {}
-        self.input_shape = input_shape
-        self.output_shape = input_shape.copy()
-        self.output_shape[-1] = num_units
-        self.has_weights = True
-        # Caculate shape
-        # input shape => [batch_size, d1,..., d_n-1, d_n]
-        # output shape => [batch_size, d1,..., d_n-1, num_units]
-        # weight shape => [d_n, num_units]
-        # bias shape => [num_units]
-        self.bias_shape = [num_units]
-        self.weight_shape = [input_shape[-1], num_units]
+        self.bias_shape = [num_out]
+        self.weight_shape = [num_in, num_out]
 
         self.parameters['W'] = self.initiate_vars(self.weight_shape)
         self.parameters['b'] = self.initiate_vars_zero(self.bias_shape)
@@ -66,38 +55,16 @@ class Dense(Layer):
     def forward(self, x, is_training=True):
         # check whether data has valid shape or not
         if is_training:
-            self.cache['x'] = x
-        recieved_shape = list(x.shape)
-        if(len(recieved_shape) != len(self.input_shape)):
-            raise ValueError('Data has shape {} is not compatible with {}'.format(
-                x.shape, self.input_shape))
-        recieved_shape[self.input_shape == -1] = -1
-        if(recieved_shape != self.input_shape):
-            raise ValueError('Data has shape {} is not compatible with {}'.format(
-                x.shape, self.input_shape))
-        output = np.matmul(
-            x, self.parameters['W']) + self.parameters['b']
-        return output
+            self.cache['x'] = x.copy()
+            self.batch_size = x.shape[0]
+        y = np.dot(x, self.parameters['W']) + self.parameters['b']
+
+        return y
 
     def backward(self, dy):
-        # expected dy => [batch_size, ..., d_n-1, num_units]
-        recieved_shape = list(dy.shape)
-        if(len(recieved_shape) != len(self.output_shape)):
-            raise ValueError('d_y has shape {} is not compatible with {}'.format(
-                dy.shape, self.output_shape))
-        recieved_shape[self.input_shape == -1] = -1
-        if(recieved_shape != self.output_shape):
-            raise ValueError('d_y has shape {} is not compatible with {}'.format(
-                dy.shape, self.output_shape))
-        batch_size = dy.shape[0]
-        self.grads['db'] = np.sum(dy, axis=0) / batch_size
-        if len(self.input_shape) == 2:
-            self.grads['dW'] = np.sum(np.matmul(np.expand_dims(
-                self.cache['x'], 2), np.expand_dims(dy, axis=1)), axis=0) / batch_size
-        else:
-            self.grads['dW'] = np.sum(np.matmul(np.swapaxes(
-                self.cache['x'], -1, -2), dy), axis=0, keepdims=True) / batch_size
-        dx = np.matmul(dy, np.swapaxes(self.parameters['W'], -1, -2))
+        self.grads['db'] = np.sum(dy, axis=0) / self.batch_size
+        self.grads['dW'] = np.sum(np.dot(self.cache['x'].T, dy)) /self.batch_size
+        dx = np.dot(dy, self.parameters['W'].T)
 
         return dx
 
@@ -157,28 +124,28 @@ class Softmax(Layer):
         return logits
 
     def backward(self, dy):
-        if(len(dy.shape) != 2):
-            raise ValueError(
-                'data have shape is not compatible. Expect [batch_size, nums_score]')
-        num_units = dy.shape[-1]
+        # if(len(dy.shape) != 2):
+        #     raise ValueError(
+        #         'data have shape is not compatible. Expect [batch_size, nums_score]')
+        # num_units = dy.shape[-1]
 
-        # [batch_size, num_units, 1] . [batch_size, 1, num_units]
-        # = [batch_size, num_units, num_units]
-        # Represent of matrix ds:
-        #   [ds1/dx1 ds1/dx2 ... ds1/dxN]
-        #   [ds2/dx1 ds2/dx2 ... ds2/dxN]
-        #   [  ...           ...    ... ]
-        #   [dsN/dx1 dsN/dx2 ... dsN/dxN]
-        # with ds_i/dx_j = S_i(1 - S_j)  , with i==j
-        #                = -S_i*S_j      , with i!=j
-        ds = -np.matmul(np.expand_dims(self.cache['logits'], axis=-1),
-                        np.expand_dims(self.cache['logits'], axis=1))
-        ds[:, np.arange(num_units), np.arange(
-            num_units)] += self.cache['logits']
+        # # [batch_size, num_units, 1] . [batch_size, 1, num_units]
+        # # = [batch_size, num_units, num_units]
+        # # Represent of matrix ds:
+        # #   [ds1/dx1 ds1/dx2 ... ds1/dxN]
+        # #   [ds2/dx1 ds2/dx2 ... ds2/dxN]
+        # #   [  ...           ...    ... ]
+        # #   [dsN/dx1 dsN/dx2 ... dsN/dxN]
+        # # with ds_i/dx_j = S_i(1 - S_j)  , with i==j
+        # #                = -S_i*S_j      , with i!=j
+        # ds = -np.matmul(np.expand_dims(self.cache['logits'], axis=-1),
+        #                 np.expand_dims(self.cache['logits'], axis=1))
+        # ds[:, np.arange(num_units), np.arange(
+        #     num_units)] += self.cache['logits']
 
-        dx = np.matmul(np.expand_dims(dy, axis=1), ds)
-        return np.squeeze(dx, axis=1)
-
+        # dx = np.matmul(np.expand_dims(dy, axis=1), ds)
+        # return np.squeeze(dx, axis=1)
+        return dy
 
 class CELoss(Layer):
     """ Cross Entropy Loss
@@ -192,10 +159,12 @@ class CELoss(Layer):
     def __init__(self):
         self.cache = {}
         self.has_weights = False
+        self.eps = 1e-8
         super(CELoss, self).__init__()
 
     def forward(self, logits, labels, is_training=True):
-        logits[logits < 1e-10] = 1e-8
+        
+        logits = np.clip(logits, self.eps, 1. - self.eps)
         # logits => [batch_size, num_units]
         # labels => [batch_size, num_units]
         if is_training:
@@ -206,20 +175,14 @@ class CELoss(Layer):
                       keepdims=True) / batch_size
         return loss
 
-    def backward(self, loss):
+    def backward(self, logits, labels):
         # => [batch_size, num_units]
 
-        return - self.cache['labels'] / (self.cache['logits'] * self.cache['logits'].shape[0])
+        return logits - labels
+        # return - self.cache['labels'] / (self.cache['logits'] * self.cache['logits'].shape[0])
 
 
-class DiscreteCELoss(Layer):
-    def __init__(self):
-        self.cache = {}
-        self.has_weights = False
-        super(DiscreteCELoss, self).__init__()
 
-    def forward(self, logits, label, is_trainin=True):
-        loss = - np.sum(logits(label))
 
 
 class Model:

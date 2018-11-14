@@ -48,10 +48,12 @@ class Model:
             
             for i, (x_batch, y_batch) in enumerate(get_batches(data, labels)):
                 batch_preds = x_batch.copy()
+                if i ==0:
+                    print('[DEBUG] x_batch, y_batch:', batch_preds.shape, y_batch.shape)
                 for num, layer in enumerate(self.model):
                     batch_preds = layer.forward_propagate(
                         batch_preds, save_cache=True)
-                
+                print('[DEBUG] batch preds:', batch_preds.shape)
                 dA = self.loss.compute_derivative(y_batch, batch_preds)
                 for layer in reversed(self.model):
                     dA = layer.back_propagate(dA)

@@ -23,8 +23,8 @@ if __name__ == '__main__':
 
     train_images = train_images / 255.0
     test_images = test_images / 255.0
-    train_images = train_images.reshape((-1, 784))
-    test_images = test_images.reshape((-1, 784))
+    train_images = train_images.reshape((-1, 784)).T
+    test_images = test_images.reshape((-1, 784)).T
 
     # labels = np.zeros((train_labels.shape[0], 10))
     # labels[np.arange(train_labels.shape[0]), train_labels] = 1
@@ -38,9 +38,6 @@ if __name__ == '__main__':
     print("Test data shape: {}, {}".format(test_images.shape, test_labels.shape))
 
     model = Model(
-        Flatten(),
-        FullyConnected(units=200),
-        Elu(),
         FullyConnected(units=200),
         Elu(),
         FullyConnected(units=10),

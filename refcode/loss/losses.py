@@ -11,6 +11,7 @@ class CategoricalCrossEntropy:
        :param epsilon:[float default=1e-8]: A small value for applying clipping for stability
        :return:[float]: The computed value of loss.
        '''
+
         predictions /= np.sum(predictions, axis=0, keepdims=True)
         predictions = np.clip(predictions, epsilon, 1. - epsilon)
         return -np.sum(labels * np.log(predictions))
