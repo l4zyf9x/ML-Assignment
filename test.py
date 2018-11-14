@@ -1,11 +1,11 @@
-from nn import *
+from neural import *
 from numerical_grads import *
 
 
 class TestClass(object):
     def test_dense_forward(self):
         input = np.ones(shape=[10, 5])
-        dense = Dense(input_shape=[-1, 5], num_units=20)
+        dense = Linear(num_in=5, num_out=20)
         output = dense.forward(input)
 
         assert list(dense.parameters['W'].shape) == [5, 20]
@@ -14,7 +14,7 @@ class TestClass(object):
 
     def test_dense_backward(self):
         input = np.arange(2*3).reshape((2, 3))
-        dense = Dense(input_shape=[-1, 3], num_units=4)
+        dense = Linear(num_in=3, num_out=4)
 
         dense.forward(input, is_training=True)
         dy = np.ones((2, 4))
@@ -31,7 +31,7 @@ class TestClass(object):
 
     def test_dense_backward_2(self):
         input = np.arange(20*40, dtype=float).reshape((20, 40))
-        dense = Dense(input_shape=[-1, 40], num_units=60)
+        dense = Linear(num_in=40, num_out=60)
 
         dense.forward(input, is_training=True)
         dy = np.ones((20, 60))
@@ -70,8 +70,8 @@ class TestClass(object):
                           [5, 3, 1, 2],
                           [3, 9, 6, 7]], dtype=float)
 
-        loss = ce_loss.forward(input, label)
-        dx = ce_loss.backward(loss)
+        loss = ce_loss.compute_loss(input, label)
+        dx = ce_loss.compute_derivation(input, label)
         dx_num = compute_num_grads_3(ce_loss, input, label)
         norm = np.linalg.norm(dx - dx_num) / np.linalg.norm(dx + dx_num)
         assert norm < 1e-6
@@ -86,8 +86,8 @@ class TestClass(object):
                           [5, 3, 1, 2],
                           [3, 9, 6, 7]], dtype=float)
         o1 = softmax.forward(input)
-        loss = ce_loss.forward(o1, label)
-        do1 = ce_loss.backward(loss)
+        loss = ce_loss.compute_loss(o1, label)
+        do1 = ce_loss.compute_derivation(o1, label)
         dx = softmax.backward(do1)
 
         dx_num = compute_num_grads_4(softmax, ce_loss, input, label)

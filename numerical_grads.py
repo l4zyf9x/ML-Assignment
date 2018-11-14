@@ -1,4 +1,4 @@
-from nn import *
+from layer import *
 import numpy as np
 
 
