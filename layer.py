@@ -602,51 +602,51 @@ class Model:
         return np.mean(np.argmax(labels, axis=1) == np.argmax(predictions, axis=1))
 
 
-num_classes = 10
-class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
-               'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
+# num_classes = 10
+# class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
+#                'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
 
-fashion_mnist = keras.datasets.fashion_mnist
-(train_images, train_labels), (test_images, test_labels) = fashion_mnist.load_data()
+# fashion_mnist = keras.datasets.fashion_mnist
+# (train_images, train_labels), (test_images, test_labels) = fashion_mnist.load_data()
 
-# train_images = train_images / 255.0
-# test_images = test_images / 255.0
-train_images = train_images.reshape((-1, 28, 28, 1))
-test_images = test_images.reshape((-1, 28, 28, 1))
-# train_images = train_images.reshape((-1, 784))
-# test_images = test_images.reshape((-1, 784))
+# # train_images = train_images / 255.0
+# # test_images = test_images / 255.0
+# train_images = train_images.reshape((-1, 28, 28, 1))
+# test_images = test_images.reshape((-1, 28, 28, 1))
+# # train_images = train_images.reshape((-1, 784))
+# # test_images = test_images.reshape((-1, 784))
 
-batch_size = train_images.shape[0]
-eval_images = train_images[batch_size*9//10:]
-eval_labels = train_labels[batch_size*9//10:]
-train_images = train_images[:batch_size*9//10]
-train_labels = train_labels[:batch_size*9//10]
-
-
-labels = np.zeros((train_labels.shape[0], 10))
-labels[np.arange(train_labels.shape[0]), train_labels] = 1
-train_labels = labels
-labels = np.zeros((test_labels.shape[0], 10))
-labels[np.arange(test_labels.shape[0]), test_labels] = 1
-test_labels = labels
-labels = np.zeros((eval_labels.shape[0], 10))
-labels[np.arange(eval_labels.shape[0]), eval_labels] = 1
-eval_labels = labels
+# batch_size = train_images.shape[0]
+# eval_images = train_images[batch_size*9//10:]
+# eval_labels = train_labels[batch_size*9//10:]
+# train_images = train_images[:batch_size*9//10]
+# train_labels = train_labels[:batch_size*9//10]
 
 
-
-model1 = Model(Conv2d(input_shape=(-1, 28, 28, 1), filter=(10, 2, 2, 1)),
-              Flatten(input_shape= (-1, 27, 27, 10)),
-              Linear(num_in=27*27*10, num_out=10),
-              Softmax())
-
-model = Model(Linear(num_in=784, num_out=10),
-               Relu(),
-               Linear(num_in=10, num_out=10),
-               Softmax())
+# labels = np.zeros((train_labels.shape[0], 10))
+# labels[np.arange(train_labels.shape[0]), train_labels] = 1
+# train_labels = labels
+# labels = np.zeros((test_labels.shape[0], 10))
+# labels[np.arange(test_labels.shape[0]), test_labels] = 1
+# test_labels = labels
+# labels = np.zeros((eval_labels.shape[0], 10))
+# labels[np.arange(eval_labels.shape[0]), eval_labels] = 1
+# eval_labels = labels
 
 
 
-model1.set_loss(CELoss())
+# model1 = Model(Conv2d(input_shape=(-1, 28, 28, 1), filter=(10, 2, 2, 1)),
+#               Flatten(input_shape= (-1, 27, 27, 10)),
+#               Linear(num_in=27*27*10, num_out=10),
+#               Softmax())
+
+# model = Model(Linear(num_in=784, num_out=10),
+#                Relu(),
+#                Linear(num_in=10, num_out=10),
+#                Softmax())
+
+
+
+# model1.set_loss(CELoss())
 
 # model1.train(train_images, train_labels, eval_images, eval_labels, learning_rate=0.00001, l2_penalty=0.)
