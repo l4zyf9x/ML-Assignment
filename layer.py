@@ -114,6 +114,94 @@ def col2im_indices(cols, x_shape, filter=(2, 2), padding=0,
         return x_padded
     return x_padded[:, :, padding:-padding, padding:-padding].tranpose(0, 2, 3, 1)
 
+class Conv2DNaive(Layer):
+
+    def __init__(self, input_shape=(-1, 3, 3, 1),
+                 filter=(1, 2, 2, 1), stride=(1, 1), padding='VALID'):        
+        super().__init__()
+        self.cache = {}
+        self.grads = {}
+        self.weight_shape = filter
+        self.stride = stride
+        self.pading = 0
+        # self.activation = activation
+        self.input_shape = input_shape
+        self.parameters['W'] = self.initiate_vars(self.weight_shape)
+        self.parameters['b'] = self.initiate_vars((self.weight_shape[0],))
+        self.has_weights = True
+
+    def initiate_vars(self, shape, distribution=None):
+        if distribution != None:
+            raise ValueError(
+                'Not implement distribution for initiating variable')
+
+        return np.random.standard_normal(shape) * 1e-4
+
+    def forward(self, x, is_training=True):
+        w = self.parameters['W']
+        stride_height, stride_width = self.stride
+        pad = self.pading
+        pad_width = ((0, 0), (pad, pad), (pad, pad), (0, 0))
+        x = np.pad(x, pad_width=pad_width, mode='constant', constant_values=0)
+
+        N, H, W, C = x.shape
+        F, HH, WW, C = self.weight_shape
+
+        out_height = 1 + (H + 2*pad - HH)//stride_height
+        out_width = 1 + (W + 2*pad - WW)//stride_width
+
+        out = np.zeros((N, out_height, out_width, F))
+
+        for i in range(N):
+            for z in range(F):
+                for j in range(out_height):
+                    h_start = j*stride_height
+                    for k in range(out_width):
+                        w_start = k*stride_width
+                        out[i, j, k, z] = np.sum(x[i, h_start:(h_start+HH), w_start:(w_start+WW), :] * w[z, :, :, :])
+
+        if is_training:
+            self.cache['x'] = x.copy()
+
+        return out
+
+    def backward(self, dout):
+        dx, dW, db = None, None, None
+        x = self.cache['x']
+        w = self.parameters['W']
+        b = self.parameters['b']
+        # Get the pad and stride
+        pad = self.pading
+        stride_height, stride_width = self.stride
+
+        # Get dimensions
+        N, H, W, C = x.shape
+        F, HH, WW, _ = self.weight_shape
+        N, H_filter, W_filter, F = dout.shape
+
+        # Initialize matrices for gradients
+        dx = np.zeros(x.shape)
+        dW = np.zeros(w.shape)
+        db = np.zeros(b.shape)
+        # Backpropagate dout through each input patch and each convolution filter
+        for i in range(N):
+            for z in range(F):
+                for j in range(H_filter):
+                    h_start = j*stride_height
+                    for k in range(W_filter):
+                        w_start = k*stride_width
+                        dx[i, h_start:(h_start+HH), w_start:(w_start+WW), :] += w[z, :, :, :] * dout[i, j, k, z]
+                        dW[z, :, :, :] += x[i, h_start:(h_start+HH), w_start:(w_start+WW), :] * dout[i, j, k, z]
+
+        db = dout.sum(axis=(0, 1, 2))
+        self.grads['dW'] = dW
+        self.grads['db'] = db
+
+        return dx[:, :, pad:-pad, pad:-pad]
+
+    def apply_grads(self, learning_rate=0.01, l2_penalty=1e-4):
+        self.parameters['W'] -= learning_rate * (self.grads['dW'] + l2_penalty * self.parameters['W'])
+        self.parameters['b'] -= learning_rate * (self.grads['db'] + l2_penalty * self.parameters['b'])
 
 class Conv2d(Layer):
     """ An implementation of Convolution 2D"""
@@ -365,6 +453,66 @@ class CELoss():
         return - self.cache['labels'] / (self.cache['logits'] * self.batch_size)
 
 
+class MaxPooling2DNaive(Layer):
+
+    def __init__(self, pool_size=(2, 2), strides=(1, 1), padding=0):
+        self.cache = {}
+        self.pool_size = pool_size
+        self.strides = strides
+        self.pading = padding
+
+    def forward(self, x, is_training=True):
+        N, H, W, C = x.shape
+        HH, WW = self.pool_size
+        stride_height, stride_width = self.strides
+
+        out_height = (H - HH) // stride_height + 1
+        out_width = (W - WW) // stride_width + 1
+
+        out = np.zeros((N, out_height, out_width, C))
+
+        for j in range(out_height):
+            h_start = j*stride_height
+            for k in range(out_width):
+                w_start = k*stride_width
+                out[:, j, k, :] = (
+                    x[:, h_start:(h_start+HH), w_start:(w_start+WW), :].max(axis=(1, 2)))
+
+        if is_training:
+            self.cache['x'] = x.copy()
+
+        return out
+
+    def backward(self, dout):
+        dx = None
+        x = self.cache['x']
+        # Get dimensions
+        N, H, W, C = x.shape
+        HH, WW = self.pool_size
+        stride_height, stride_width = self.strides
+
+        # Compute dimension filters
+        out_height = (H-HH) // stride_height + 1
+        out_width = (W-WW) // stride_width + 1
+
+        # Initialize tensor for dx
+        dx = np.zeros_like(x)
+
+        # Backpropagate dout on x
+        for i in range(N):
+            for z in range(C):
+                for j in range(out_height):
+                    h_start = j*stride_height
+                    for k in range(out_width):
+                        w_start = k*stride_width
+                        dpatch = np.zeros((HH, WW))
+                        input_patch = x[i, h_start:(h_start+HH), w_start:(w_start+WW), z]
+                        idxs_max = np.where(input_patch == input_patch.max())
+                        dpatch[idxs_max[0], idxs_max[1]] = dout[i, j, k, z]
+                        dx[i, h_start:(h_start+HH), w_start:(w_start+WW), z] += dpatch
+
+        return dx
+
 class Model:
     def __init__(self, *model, **kwargs):
         self.model = model
@@ -501,4 +649,4 @@ model = Model(Linear(num_in=784, num_out=10),
 
 model1.set_loss(CELoss())
 
-model1.train(train_images, train_labels, eval_images, eval_labels, learning_rate=0.00001, l2_penalty=0.)
+# model1.train(train_images, train_labels, eval_images, eval_labels, learning_rate=0.00001, l2_penalty=0.)
