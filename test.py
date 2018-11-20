@@ -161,4 +161,117 @@ class TestClass(object):
         print(num_grads)
         norm = np.linalg.norm(num_grads - grads) / np.linalg.norm(num_grads + grads)
         assert norm < 1e-6
-        assert False
+        # assert False
+
+    def test_convolution_navie(self):
+        np.random.seed(0)
+        
+        x = np.random.randint(1, 10, size=(3,4,4,1)).astype(float)
+        y = np.array([[1, 0, 0, 0, 0],
+                      [0, 1, 0, 0, 0],
+                      [0, 0, 0, 1, 0]]).astype(float)
+
+        eps = 1e-7
+        model = Model(Conv2DNaive(input_shape=(-1, 4, 4, 1), filter=(5, 2, 2, 1)),
+              Flatten(input_shape= (-1, 3, 3, 5)),
+              Linear(num_in=3*3*5, num_out=5),
+              Softmax())
+        model.set_loss(CELoss())
+        para_cp = model.model[0].parameters['W'].copy()
+        flat = model.model[0].parameters['W'].reshape(-1)
+        num_grads = np.zeros(flat.shape)
+
+        batch_preds = x.copy()
+        for  layer in model.model:
+            batch_preds = layer.forward(batch_preds, is_training=True)
+        loss = model.loss.compute_loss(
+                    logits=batch_preds, labels=y)
+        dA = model.loss.compute_derivation(
+                    logits=batch_preds, labels=y)
+        for layer in reversed(model.model):
+            dA = layer.backward(dA)
+        
+        
+        grads = model.model[0].grads['dW'].copy().reshape(-1)
+        
+
+        model.model[0].parameters['W'] = para_cp.copy()
+        for idx,_ in enumerate(np.arange(len(flat))):
+            model.model[0].parameters['W'].reshape(-1)[idx] -= eps
+            batch_preds = x.copy()
+            for layer in model.model:
+                batch_preds = layer.forward(batch_preds, is_training=False)
+            loss1 = model.loss.compute_loss(
+                    logits=batch_preds, labels=y)
+            
+            model.model[0].parameters['W'].reshape(-1)[idx] += 2*eps
+            batch_preds = x.copy()
+            for  layer in model.model:
+                batch_preds = layer.forward(batch_preds, is_training=False)
+            loss2 = model.loss.compute_loss(
+                    logits=batch_preds, labels=y)
+            num_grads[idx]= (loss2-loss1)/(2*eps)
+        
+
+
+        print (grads)
+        print(num_grads)
+        norm = np.linalg.norm(num_grads - grads) / np.linalg.norm(num_grads + grads)
+        assert norm < 1e-6
+        # assert False
+
+    def test_maxpooling_navie(self):
+        np.random.seed(0)
+        
+        x = np.random.randint(1, 10, size=(3,4,4,1)).astype(float)
+        y = np.array([[1, 0, 0, 0, 0],
+                      [0, 1, 0, 0, 0],
+                      [0, 0, 0, 1, 0]]).astype(float)
+
+        eps = 1e-9
+        model = Model(MaxPooling2DNaive(pool_size=(2, 2)),
+              Flatten(input_shape= (-1, 3, 3, 1)),
+              Linear(num_in=3*3, num_out=5),
+              Softmax())
+        model.set_loss(CELoss())
+
+
+
+        batch_preds = x.copy()
+        for  layer in model.model:
+            batch_preds = layer.forward(batch_preds, is_training=True)
+        loss = model.loss.compute_loss(
+                    logits=batch_preds, labels=y)
+        dA = model.loss.compute_derivation(
+                    logits=batch_preds, labels=y)
+        for layer in reversed(model.model):
+            dA = layer.backward(dA)
+    
+        dA = dA.reshape(-1)
+        # grads = model.model[0].grads['dW'].copy().reshape(-1)
+        
+        num_grads = np.zeros(x.shape).reshape(-1)
+        # model.model[0].parameters['W'] = para_cp.copy()
+        for idx,_ in enumerate(np.arange(len(x.reshape(-1)))):
+            batch_preds = x.copy()
+            batch_preds.reshape(-1)[idx] -= eps
+            for layer in model.model:
+                batch_preds = layer.forward(batch_preds, is_training=False)
+            loss1 = model.loss.compute_loss(
+                    logits=batch_preds, labels=y)
+                        
+            batch_preds = x.copy()
+            batch_preds.reshape(-1)[idx] += eps
+            for  layer in model.model:
+                batch_preds = layer.forward(batch_preds, is_training=False)
+            loss2 = model.loss.compute_loss(
+                    logits=batch_preds, labels=y)
+            num_grads[idx]= (loss2-loss1)/(2*eps)
+        
+
+
+        print (dA)
+        print(num_grads)
+        norm = np.linalg.norm(num_grads - dA) / np.linalg.norm(num_grads + dA)
+        assert norm < 1e-6
+        # assert False        
