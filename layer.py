@@ -1,6 +1,8 @@
 import numpy as np
 from tensorflow import keras
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+import time
 
 
 class Layer:
@@ -409,13 +411,13 @@ class Model:
         if self.loss is None:
             raise RuntimeError("Set loss first using 'model.set_loss(<loss>)'")
         self.set_batch_size(batch_size)
-        self.set_num_classes(labels.shape[1])
-
+        self.set_num_classes(train_labels.shape[1])
         iter = 0
-        for epoch in range(epochs):
-            print('Running Epoch:', epoch + 1)
+        for epoch in tqdm(range(epochs)):
+            
+            # print('Running Epoch:', epoch + 1)
 
-            for i, (x_batch, y_batch) in enumerate(self.get_batches(train_data, train_labels)):
+            for i, (x_batch, y_batch) in enumerate(self.get_batches(train_data, train_labels, batch_size=batch_size)):
                 batch_preds = x_batch.copy()
                 for  layer in self.model:
                     batch_preds = layer.forward(batch_preds, is_training=True)
@@ -440,6 +442,7 @@ class Model:
                         iter, loss, train_acc, eval_acc))
                 # break
             learning_rate *= learning_rate_decay
+            
 
     def predict(self, data):
         batch_preds = data.copy()
@@ -454,51 +457,51 @@ class Model:
         return np.mean(np.argmax(labels, axis=1) == np.argmax(predictions, axis=1))
 
 
-num_classes = 10
-class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
-               'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
+# num_classes = 10
+# class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
+#                'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
 
-fashion_mnist = keras.datasets.fashion_mnist
-(train_images, train_labels), (test_images, test_labels) = fashion_mnist.load_data()
+# fashion_mnist = keras.datasets.fashion_mnist
+# (train_images, train_labels), (test_images, test_labels) = fashion_mnist.load_data()
 
-# train_images = train_images / 255.0
-# test_images = test_images / 255.0
-train_images = train_images.reshape((-1, 28, 28, 1))
-test_images = test_images.reshape((-1, 28, 28, 1))
+# # train_images = train_images / 255.0
+# # test_images = test_images / 255.0
+# # train_images = train_images.reshape((-1, 28, 28, 1))
+# # test_images = test_images.reshape((-1, 28, 28, 1))
 # train_images = train_images.reshape((-1, 784))
 # test_images = test_images.reshape((-1, 784))
 
-batch_size = train_images.shape[0]
-eval_images = train_images[batch_size*9//10:]
-eval_labels = train_labels[batch_size*9//10:]
-train_images = train_images[:batch_size*9//10]
-train_labels = train_labels[:batch_size*9//10]
+# batch_size = train_images.shape[0]
+# eval_images = train_images[batch_size*9//10:]
+# eval_labels = train_labels[batch_size*9//10:]
+# train_images = train_images[:batch_size*9//10]
+# train_labels = train_labels[:batch_size*9//10]
 
 
-labels = np.zeros((train_labels.shape[0], 10))
-labels[np.arange(train_labels.shape[0]), train_labels] = 1
-train_labels = labels
-labels = np.zeros((test_labels.shape[0], 10))
-labels[np.arange(test_labels.shape[0]), test_labels] = 1
-test_labels = labels
-labels = np.zeros((eval_labels.shape[0], 10))
-labels[np.arange(eval_labels.shape[0]), eval_labels] = 1
-eval_labels = labels
-
-
-
-model1 = Model(Conv2d(input_shape=(-1, 28, 28, 1), filter=(10, 2, 2, 1)),
-              Flatten(input_shape= (-1, 27, 27, 10)),
-              Linear(num_in=27*27*10, num_out=10),
-              Softmax())
-
-model = Model(Linear(num_in=784, num_out=10),
-               Relu(),
-               Linear(num_in=10, num_out=10),
-               Softmax())
+# labels = np.zeros((train_labels.shape[0], 10))
+# labels[np.arange(train_labels.shape[0]), train_labels] = 1
+# train_labels = labels
+# labels = np.zeros((test_labels.shape[0], 10))
+# labels[np.arange(test_labels.shape[0]), test_labels] = 1
+# test_labels = labels
+# labels = np.zeros((eval_labels.shape[0], 10))
+# labels[np.arange(eval_labels.shape[0]), eval_labels] = 1
+# eval_labels = labels
 
 
 
-model1.set_loss(CELoss())
+# model = Model(Conv2d(input_shape=(-1, 28, 28, 1), filter=(10, 2, 2, 1)),
+#               Flatten(input_shape= (-1, 27, 27, 10)),
+#               Linear(num_in=27*27*10, num_out=10),
+#               Softmax())
 
-model1.train(train_images, train_labels, eval_images, eval_labels, learning_rate=0.00001, l2_penalty=0.)
+# model1 = Model(Linear(num_in=784, num_out=10),
+#                Relu(),
+#                Linear(num_in=10, num_out=10),
+#                Softmax())
+
+
+
+# model1.set_loss(CELoss())
+
+# model1.train(train_images, train_labels, eval_images, eval_labels, learning_rate=0.00001, l2_penalty=0., batch_size=200)
