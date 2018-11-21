@@ -462,6 +462,7 @@ class MaxPooling2DNaive(Layer):
         self.pool_size = pool_size
         self.strides = strides
         self.pading = padding
+        self.has_weights = False
 
     def forward(self, x, is_training=True):
         N, H, W, C = x.shape
@@ -514,6 +515,28 @@ class MaxPooling2DNaive(Layer):
                         dx[i, h_start:(h_start+HH), w_start:(w_start+WW), z] += dpatch
 
         return dx
+
+class DropOut(Layer):
+    def __init__(self, prob,  seed = None, distribution='uniform'):
+        super(DropOut, self).__init__()
+        self.has_weights= False
+        self.seed = seed
+        self.prob = prob
+        self.distribution = distribution
+        self.cache = {}
+
+    def forward(self, x, is_training=False):
+        if is_training:
+            if self.distribution == 'uniform':
+                mask = (np.random.rand(*x.shape)<self.prob)/self.prob
+            self.cache['mask'] = mask
+            out = x*mask
+        else:
+            out = x
+        return out
+
+    def backward(self, dy):
+        return self.cache['mask'] * dy
 
 class Model:
     def __init__(self, *model, **kwargs):
@@ -595,7 +618,7 @@ class Model:
     def predict(self, data):
         batch_preds = data.copy()
         for layer in self.model:
-            batch_preds = layer.forward(batch_preds)
+            batch_preds = layer.forward(batch_preds, is_training=False)
         return batch_preds
 
     def evaluate(self, data, labels):
@@ -605,51 +628,55 @@ class Model:
         return np.mean(np.argmax(labels, axis=1) == np.argmax(predictions, axis=1))
 
 
-# num_classes = 10
-# class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
-#                'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
+num_classes = 10
+class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
+               'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
 
-# fashion_mnist = keras.datasets.fashion_mnist
-# (train_images, train_labels), (test_images, test_labels) = fashion_mnist.load_data()
+fashion_mnist = keras.datasets.fashion_mnist
+(train_images, train_labels), (test_images, test_labels) = fashion_mnist.load_data()
 
-# # train_images = train_images / 255.0
-# # test_images = test_images / 255.0
-# # train_images = train_images.reshape((-1, 28, 28, 1))
-# # test_images = test_images.reshape((-1, 28, 28, 1))
-# train_images = train_images.reshape((-1, 784))
-# test_images = test_images.reshape((-1, 784))
+train_images = train_images / 255.0
+test_images = test_images / 255.0
+# train_images = train_images.reshape((-1, 28, 28, 1))
+# test_images = test_images.reshape((-1, 28, 28, 1))
+train_images = train_images.reshape((-1, 784))
+test_images = test_images.reshape((-1, 784))
 
-# batch_size = train_images.shape[0]
-# eval_images = train_images[batch_size*9//10:]
-# eval_labels = train_labels[batch_size*9//10:]
-# train_images = train_images[:batch_size*9//10]
-# train_labels = train_labels[:batch_size*9//10]
+batch_size = train_images.shape[0]
+eval_images = train_images[batch_size*9//10:]
+eval_labels = train_labels[batch_size*9//10:]
+train_images = train_images[:batch_size*9//10]
+train_labels = train_labels[:batch_size*9//10]
 
 
-# labels = np.zeros((train_labels.shape[0], 10))
-# labels[np.arange(train_labels.shape[0]), train_labels] = 1
-# train_labels = labels
-# labels = np.zeros((test_labels.shape[0], 10))
-# labels[np.arange(test_labels.shape[0]), test_labels] = 1
-# test_labels = labels
-# labels = np.zeros((eval_labels.shape[0], 10))
-# labels[np.arange(eval_labels.shape[0]), eval_labels] = 1
-# eval_labels = labels
+labels = np.zeros((train_labels.shape[0], 10))
+labels[np.arange(train_labels.shape[0]), train_labels] = 1
+train_labels = labels
+labels = np.zeros((test_labels.shape[0], 10))
+labels[np.arange(test_labels.shape[0]), test_labels] = 1
+test_labels = labels
+labels = np.zeros((eval_labels.shape[0], 10))
+labels[np.arange(eval_labels.shape[0]), eval_labels] = 1
+eval_labels = labels
 
 
 
 # model = Model(Conv2d(input_shape=(-1, 28, 28, 1), filter=(10, 2, 2, 1)),
+#             #   MaxPooling2DNaive(pool_size=(2,2)),
 #               Flatten(input_shape= (-1, 27, 27, 10)),
 #               Linear(num_in=27*27*10, num_out=10),
 #               Softmax())
 
-# model = Model(Linear(num_in=784, num_out=10),
-#                Relu(),
-#                Linear(num_in=10, num_out=10),
-#                Softmax())
+model = Model(  Linear(num_in=784, num_out=10),
+                Relu(),
+                DropOut(0.8),
+                Linear(num_in=10, num_out=10),
+                # Relu(),
+                # DropOut(0.8),
+                Softmax())
 
 
 
-# model1.set_loss(CELoss())
+model.set_loss(CELoss())
 
-# model.train(train_images, train_labels, eval_images, eval_labels, learning_rate=0.00001, l2_penalty=0., batch_size=200)
+model.train(train_images, train_labels, eval_images, eval_labels, learning_rate=0.01, l2_penalty=0., batch_size=200)
