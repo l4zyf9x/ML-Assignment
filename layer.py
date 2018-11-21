@@ -63,7 +63,7 @@ def im2col_indices(x, filter=(2, 2), padding=1, stride=(1, 1)):
         field_height: kH
         field_width: kW
 
-    Return: [B*OH*OW, kH*kW*Cin]
+    Return: [OH*OW*B, kH*kW*Cin]
     """
 
     # x => [B, Cin, H, W]
@@ -113,8 +113,8 @@ def col2im_indices(cols, x_shape, filter=(2, 2), padding=0,
     cols_reshaped = cols_reshaped.transpose(0, 2, 1)
     np.add.at(x_padded, (slice(None), k, i, j), cols_reshaped)
     if padding == 0:
-        return x_padded
-    return x_padded[:, :, padding:-padding, padding:-padding].tranpose(0, 2, 3, 1)
+        return x_padded.transpose(0, 2, 3, 1)
+    return x_padded[:, :, padding:-padding, padding:-padding].transpose(0, 2, 3, 1)
 
 class Conv2DNaive(Layer):
 
@@ -516,6 +516,50 @@ class MaxPooling2DNaive(Layer):
 
         return dx
 
+
+class MaxPooling2D(Layer):
+
+    def __init__(self, pool_size=(2, 2), stride=(1, 1), padding=0):
+        self.cache = {}
+        self.pool_size = pool_size
+        self.stride = stride
+        self.pading = padding
+        self.has_weights = False
+
+    def forward(self, x, is_training=True):
+        N, H, W, C = x.shape
+        pool_height, pool_width = self.pool_size
+        stride_height, stride_width = self.stride
+
+        out_height = (H - pool_height) // stride_height + 1
+        out_width = (W - pool_width) // stride_width + 1
+
+        x_split = x.transpose(0, 3, 1, 2).reshape(N * C, H, W, 1)
+        x_cols = im2col_indices(x_split, self.pool_size, padding=0, stride=self.stride) # (out_height*out_width*N*C, H*W*1)
+        x_cols_argmax = np.argmax(x_cols, axis=1)
+        x_cols_max = x_cols[np.arange(x_cols.shape[0]), x_cols_argmax]              # (out_height*out_width*N*C)
+        out = x_cols_max.reshape(out_height, out_width, N, C).transpose(2, 0, 1, 3) # (N, out_height,out_width, C)
+
+        if is_training:
+            self.cache['x'] = x.copy()
+            self.cache['x_cols'] = x_cols
+            self.cache['x_cols_argmax'] = x_cols_argmax
+
+        return out # (N, out_height,out_width, C)
+
+    def backward(self, dout):
+        x, x_cols, x_cols_argmax = self.cache['x'], self.cache['x_cols'], self.cache['x_cols_argmax']
+        N, H, W, C = x.shape
+        #dout: # (N, out_height,out_width, C)
+        dout_reshaped = dout.transpose(1, 2, 0, 3).flatten() # (out_height*out_width*N*C)
+        dx_cols = np.zeros_like(x_cols)                      # (out_height*out_width*N*C, H*W*1)
+        dx_cols[np.arange(dx_cols.shape[0]), x_cols_argmax] = dout_reshaped
+
+        dx = col2im_indices(dx_cols, (N * C, H, W, 1), self.pool_size, padding=0, stride=self.stride)  #[N, H, W, C]
+        dx = dx.reshape((N,C,H,W)).transpose(0,2,3,1)
+        return dx
+
+
 class DropOut(Layer):
     def __init__(self, prob,  seed = None, distribution='uniform'):
         super(DropOut, self).__init__()
@@ -637,10 +681,10 @@ fashion_mnist = keras.datasets.fashion_mnist
 
 train_images = train_images / 255.0
 test_images = test_images / 255.0
-# train_images = train_images.reshape((-1, 28, 28, 1))
-# test_images = test_images.reshape((-1, 28, 28, 1))
-train_images = train_images.reshape((-1, 784))
-test_images = test_images.reshape((-1, 784))
+train_images = train_images.reshape((-1, 28, 28, 1))
+test_images = test_images.reshape((-1, 28, 28, 1))
+# train_images = train_images.reshape((-1, 784))
+# test_images = test_images.reshape((-1, 784))
 
 batch_size = train_images.shape[0]
 eval_images = train_images[batch_size*9//10:]
@@ -661,22 +705,23 @@ eval_labels = labels
 
 
 
-# model = Model(Conv2d(input_shape=(-1, 28, 28, 1), filter=(10, 2, 2, 1)),
-#             #   MaxPooling2DNaive(pool_size=(2,2)),
-#               Flatten(input_shape= (-1, 27, 27, 10)),
-#               Linear(num_in=27*27*10, num_out=10),
-#               Softmax())
+model = Model(Conv2d(input_shape=(-1, 28, 28, 1), filter=(10, 2, 2, 1)),
+            #   MaxPooling2D(pool_size=(2,2)),
+              DropOut(0.8),
+              Flatten(input_shape= (-1, 26, 26, 10)),
+              Linear(num_in=26*26*10, num_out=10),
+              Softmax())
 
-model = Model(  Linear(num_in=784, num_out=10),
-                Relu(),
-                DropOut(0.8),
-                Linear(num_in=10, num_out=10),
-                # Relu(),
-                # DropOut(0.8),
-                Softmax())
+# model = Model(  Linear(num_in=784, num_out=10),
+#                 Relu(),
+#                 DropOut(0.8),
+#                 Linear(num_in=10, num_out=10),
+#                 # Relu(),
+#                 # DropOut(0.8),
+#                 Softmax())
 
 
 
 model.set_loss(CELoss())
 
-model.train(train_images, train_labels, eval_images, eval_labels, learning_rate=0.01, l2_penalty=0., batch_size=200)
+model.train(train_images, train_labels, eval_images, eval_labels, learning_rate=0.01, l2_penalty=0., batch_size=200, epochs=5)
