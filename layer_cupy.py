@@ -112,8 +112,8 @@ def col2im_indices(cols, x_shape, filter=(2, 2), padding=0,
     np.scatter_add(x_padded.astype(np.float32), (idx.astype(np.uint64), k.astype(np.uint64), i.astype(np.uint64), j.astype(np.uint64)), cols_reshaped.astype(np.float32))
 #     np.add.at(x_padded, (slice(None), k, i, j), cols_reshaped)
     if padding == 0:
-        return x_padded
-    return x_padded[:, :, padding:-padding, padding:-padding].tranpose(0, 2, 3, 1)
+        return x_padded.transpose(0, 2, 3, 1)
+    return x_padded[:, :, padding:-padding, padding:-padding].transpose(0, 2, 3, 1)
 
 
 class Conv2d(Layer):
